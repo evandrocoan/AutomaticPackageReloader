@@ -1,8 +1,16 @@
 import sublime_plugin
 import sublime
 import os
+from glob import glob
+import re
+
 from .reloader import reload_package, ProgressBar
 from glob import glob
+
+
+def casedpath(path):
+    r = glob(re.sub(r'([^:/\\])(?=[/\\]|$)', r'[\1]', path))
+    return r and r[0] or path
 
 
 class PackageReloaderListener(sublime_plugin.EventListener):
@@ -44,38 +52,16 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
         if view and view.file_name():
             file_path = os.path.realpath(view.file_name())
             if file_path.endswith(".py") and file_path.startswith(spp):
-
-                def get_actual_filename(name):
-                    """
-                        In Python, how can I get the correctly-cased path for a file?
-                        https://stackoverflow.com/questions/3692261/in-python-how-can-i-get-the-correctly-cased-path-for-a-file
-                    """
-                    sep = os.path.sep
-                    parts = os.path.normpath(name).split(sep)
-                    dirs = parts[0:-1]
-                    filename = parts[-1]
-                    if dirs[0] == os.path.splitdrive(name)[0]:
-                        test_name = [dirs[0].upper()]
-                    else:
-                        test_name = [sep + dirs[0]]
-                    for d in dirs[1:]:
-                        test_name += ["%s[%s]" % (d[:-1], d[-1])]
-                    path = glob(sep.join(test_name))[0]
-                    res = glob(sep.join((path, filename)))
-                    if not res:
-                        #File not found
-                        return None
-                    return res[0]
-
+                # path on Windows may not be properly cased
                 # https://github.com/randy3k/AutomaticPackageReloader/issues/10
-                file_path = get_actual_filename(file_path)
+                file_path = casedpath(file_path)
                 return file_path[len(spp):].split(os.sep)[1]
 
         folders = self.window.folders()
         if folders and len(folders) > 0:
             first_folder = os.path.realpath(folders[0])
             if first_folder.startswith(spp):
-                return os.path.basename(first_folder)
+                return os.path.basename(casedpath(first_folder))
 
         return None
 
@@ -83,7 +69,8 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
         sublime.set_timeout_async(lambda: self.run_async(pkg_name))
 
     def run_async(self, pkg_name=None):
-        pkg_name = self.current_package_name
+        if not pkg_name:
+            pkg_name = self.current_package_name
 
         if pkg_name:
             pr_settings = sublime.load_settings("package_reloader.sublime-settings")
@@ -99,7 +86,7 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
                 self.window.run_command("show_panel", {"panel": "console"})
             try:
                 reload_package(pkg_name, verbose=pr_settings.get('verbose'))
-            except:
+            except Exception:
                 sublime.status_message("Fail to reload {}.".format(pkg_name))
                 if open_console_on_failure:
                     self.window.run_command("show_panel", {"panel": "console"})
