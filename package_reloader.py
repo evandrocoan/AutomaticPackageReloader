@@ -3,13 +3,13 @@ import sublime
 import os
 from glob import glob
 import re
-from threading import Thread
+from threading import Thread, Lock
 
 from .reloader import reload_package, ProgressBar
 from glob import glob
 
 
-RELOADING = False
+reload_lock = Lock()
 
 
 def casedpath(path):
@@ -53,7 +53,6 @@ class PackageReloaderToggleReloadOnSaveCommand(sublime_plugin.WindowCommand):
 
 
 class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
-
     def is_enabled(self):
         return self.current_package_name is not None
 
@@ -74,6 +73,12 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
         return None
 
     def run(self, pkg_name=None):
+        if pkg_name is None:
+            pkg_name = self.current_package_name
+            if pkg_name is None:
+                print("Cannot detect package name.")
+                return
+
         Thread(
             name="AutomaticPackageReloader",
             target=self.run_async,
@@ -81,15 +86,12 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
         ).start()
 
     def run_async(self, pkg_name):
-        global RELOADING
-        if RELOADING:
+        lock = reload_lock # In case we're reloading AutoPackageReloader
+        if not lock.acquire(blocking=False):
             print("Reloader is running.")
             return
 
-        if not pkg_name:
-            pkg_name = self.current_package_name
-
-        if pkg_name:
+        try:
             pr_settings = sublime.load_settings("package_reloader.sublime-settings")
             open_console = pr_settings.get("open_console")
             open_console_on_failure = pr_settings.get("open_console_on_failure")
@@ -117,3 +119,5 @@ class PackageReloaderReloadCommand(sublime_plugin.WindowCommand):
                 self.window.run_command("hide_panel", {"panel": "console"})
 
             sublime.status_message("{} reloaded.".format(pkg_name))
+        finally:
+            lock.release()
